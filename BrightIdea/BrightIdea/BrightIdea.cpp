@@ -59,18 +59,12 @@ int main(int argc, char *argv[])
     hMonitor = pPhysical_monitors[0].hPhysicalMonitor;
 
     HANDLE hTimerQueue = CreateTimerQueue();
-    if (NULL == hTimerQueue)
-    {
-        printf("CreateTimerQueue failed (%d)\n", GetLastError());
+    if (hTimerQueue == NULL)
         return -5;
-    }
 
     HANDLE hTimer = NULL;
     if (!CreateTimerQueueTimer(&hTimer, hTimerQueue, TimerRoutine, &delta, 0, period_ms, 0))
-    {
-        printf("CreateTimerQueueTimer failed (%d)\n", GetLastError());
         return -6;
-    }
 
     std::cout << "Running... Press <enter> to exit. ";
     std::getchar();
