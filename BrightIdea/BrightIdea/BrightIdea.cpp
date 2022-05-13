@@ -17,10 +17,10 @@ VOID CALLBACK TimerRoutine(PVOID lpParam, BOOLEAN /*TimerOrWaitFired*/)
     if (GetMonitorBrightness(hMonitor, &min, &cur, &max))
     {
         // Set monitor brightness takes about 50 milliseconds to return. There are other functions
-		// that can tweak the color temperature, contrast, RGB drive, and RGB gain, but they are
-		// similarly slow. https://docs.microsoft.com/en-us/windows/win32/api/_monitor/
-		SetMonitorBrightness(hMonitor, cur + delta);
-		SetMonitorBrightness(hMonitor, cur);
+        // that can tweak the color temperature, contrast, RGB drive, and RGB gain, but they are
+        // similarly slow. https://docs.microsoft.com/en-us/windows/win32/api/_monitor/
+        SetMonitorBrightness(hMonitor, cur + delta);
+        SetMonitorBrightness(hMonitor, cur);
     }
 }
 
@@ -28,13 +28,12 @@ int main(int argc, char *argv[])
 {
     if (argc != 3)
     {
-		std::cout << "Usage: brightidea <period_in_ms> <delta>" << std::endl;
-		std::cout << "Example: brightidea 1000 -40" << std::endl;
+        std::cout << "Usage: brightidea <period_in_ms> <delta>" << std::endl;
+        std::cout << "Example: brightidea 1000 -40" << std::endl;
         return 0;
     }
 
-    int period_ms = atoi(argv[1]);
-    int delta = atoi(argv[2]);
+    int period_ms = atoi(argv[1]), delta = atoi(argv[2]);
 
     std::cout << "Move this window to the monitor(s) you want to manipulate." << std::endl;
     std::cout << "Press <enter> to begin.";
