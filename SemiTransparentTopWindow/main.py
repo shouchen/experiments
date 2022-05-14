@@ -54,7 +54,7 @@ def main():
 
         blend = int(arr[i % len(arr)])
         i += 1
-        print("\rAlpha=", blend, end="")
+        print(f"\rAlpha={blend:03d}", end="")
 
         # Set window transparency color
         win32gui.SetLayeredWindowAttributes(
