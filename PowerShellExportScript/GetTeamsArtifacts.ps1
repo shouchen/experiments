@@ -1,7 +1,6 @@
-# # Install Microsoft Graph module if not already installed
-# Install-Module Microsoft.Graph -Scope CurrentUser
-#
-# Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process
+################################################################################
+# Microsoft Teams Artifact Export Tool
+################################################################################
 
 param(
     [string]$User,
@@ -28,128 +27,56 @@ enum ArtifactType {
     All
 }
 
-function VisitSharePointFiles {
-    param($example)
+$output
+$firstObject = $true
 
-    # Connect to Microsoft Graph    Connect-MgGraph -Scopes "Sites.Read.All", "Files.Read.All"
+function ValidateParameters {
+    param(
+        [hashtable]$params
+    )
 
-    # Retrieve all sites    $sites = Get-MgSite -Search "*"
-    foreach ($site in $sites) {        Write-Output "Site Name: $($site.DisplayName) - URL: $($site.WebUrl)"            # Get document libraries for the site        $drives = Get-MgSiteDrive -SiteId $site.Id            foreach ($drive in $drives) {            Write-Output "   Document Library: $($drive.Name)"                    # Get top-level items in the library            $items = Get-MgDriveRootChild -DriveId $drive.Id
-            foreach ($item in $items) {                if ($item.Folder) {                    Write-Output "      Folder: $($item.Name)"                    Get-FilesAndFoldersRecursive -DriveId $drive.Id -ItemId $item.Id -Indent "         "                } else {                    Write-Output "      File: $($item.Name)"                }            }        }    }
+    if ($Usage -and ($params.Count -ne 1)) {
+        Write-Error "Can't combine Usage with other parameters" -ErrorAction Stop
+    }
 
-    # Recursive function to retrieve all nested folders and files    function Get-FilesAndFoldersRecursive {        param (            [string]$DriveId,            [string]$ItemId,            [string]$Indent        )
-
-        $subItems = Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $ItemId            foreach ($subItem in $subItems) {            if ($subItem.Folder) {                Write-Output "$Indent Folder: $($subItem.Name)"                Get-FilesAndFoldersRecursive -DriveId $DriveId -ItemId $subItem.Id -Indent "$Indent   "            } else {                Write-Output "$Indent File: $($subItem.Name)"            }        }    }
-}
-
-function VisitOneDriveFiles {
-    param($Full)
-
-    # Connect to Microsoft Graph
-    Connect-MgGraph -Scopes "User.Read.All", "Sites.Read.All", "Files.Read.All"
-
-    # Function to recursively fetch folders
-    function Get-FoldersRecursive {
-        param (
-            [string]$DriveId,
-            [string]$ParentFolderId,
-            [string]$Indent
-        )
-
-        $items = Get-MgDriveItemChild -DriveId $DriveId -DriveItemId $ParentFolderId
-
-        foreach ($item in $items) {
-            if ($item.Folder) { # If it's a folder
-                Write-Output "$Indent Folder: $($item.Name)"
-                Get-FoldersRecursive -DriveId $DriveId -ParentFolderId $item.Id -Indent "$Indent   "
-            }
+    if ($CallType -ne "" -and $CallType -ne "") {
+        if ($CallType -in [Enum]::GetNames([CallType])) {
+            $CallType = [CallType]::$CallType
+        } else {
+            Write-Error "Invalid CallType value." -ErrorAction Stop
         }
     }
 
-    # Get all users in the tenant
-    #$users = Get-MgUser -All
-    #
-    #foreach ($user in $users) {
-    #    $drive = Get-MgUserDrive -UserId $user.Id -ErrorAction SilentlyContinue
-    #    if ($drive) {
-    #        Write-Output "User: $($user.DisplayName) - OneDrive URL: $($drive.WebUrl)"
-    #    
-    #        # Get root folder and start recursion
-    #        Get-FoldersRecursive -DriveId $drive.Id -ParentFolderId $drive.Id -Indent "   "
-    #    }
-    #}
+    if ($ArtifactType -ne "" -and $ArtifactType -ne "") {
+        if ($ArtifactType -in [Enum]::GetNames([ArtifactType])) {
+            $ArtifactType = [ArtifactType]::$ArtifactType
+        } else {
+            Write-Error "Invalid ArtifactType value." -ErrorAction Stop
+        }
+    }
 
-    # Start with just myself (as a test)
-    if ($Full) {
-        Get-FoldersRecursive -DriveId "me" -ParentFolderId "root" -Indent "   "
-    } else {
-        # TODO: Go only through well-known folders
-        # Get-MgDriveItemByPath -DriveId "me" -Path "Documents/Projects/MyFolder"
+    if ($null -ne $StartDate -and $StartDate -ne "") {
+        [datetime]$temp = [DateTime]::Now
 
-        $path = "Recordings"
-        $recordingsFolder = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me/drive/root:/$path"
-        #$recordingsFolder = Get-MgDriveItemByPath -DriveId "me" -Path "Recordings"
+        if ([datetime]::TryParse($StartDate, [ref]$temp)) {
+            $StartDate = $temp;
+        } else {
+            Write-Error "Invalid StartDate." -ErrorAction Stop
+        }
+    }
 
-        Get-FoldersRecursive -DriveId "me" -ParentFolderId $recordingsFolder -Indent "   "
+    if ($null -ne $EndDate -and $EndDate -ne "") {
+        [datetime]$temp = [DateTime]::Now
 
-        # Notes = Meetings folder, *.loop (or check metadata)
-        # WB = Whiteboards folder, *.whiteboard (or check metadata)
-        # Transcript/Recordings = Recordings folder, *.mp4 (or check metadata)
+        if ([datetime]::TryParse($EndDate, [ref]$temp)) {
+            $EndDate = $temp;
+        } else {
+            Write-Error "Invalid EndDate." -ErrorAction Stop
+        }
     }
 }
 
-################################################################################
-# Validate parameters and re-assign correct type.
-################################################################################
-
-if ($Usage -and ($PSBoundParameters.Count -ne 1 -or $args.Count -ne 0)) {
-    Write-Error "Can't combine Usage with other parameters" -ErrorAction Stop
-}
-
-
-if ($CallType -ne "" -and $CallType -ne "") {
-    if ($CallType -in [Enum]::GetNames([CallType])) {
-        $CallType = [CallType]::$CallType
-    } else {
-        Write-Error "Invalid CallType value." -ErrorAction Stop
-    }
-}
-
-if ($ArtifactType -ne "" -and $ArtifactType -ne "") {
-    if ($ArtifactType -in [Enum]::GetNames([ArtifactType])) {
-        $ArtifactType = [ArtifactType]::$ArtifactType
-    } else {
-        Write-Error "Invalid ArtifactType value." -ErrorAction Stop
-    }
-}
-
-if ($StartDate -ne $null -and $StartDate -ne "") {
-    [datetime]$temp = [DateTime]::Now
-
-    if ([datetime]::TryParse($StartDate, [ref]$temp)) {
-        $StartDate = $temp;
-    } else {
-        Write-Error "Invalid StartDate." -ErrorAction Stop
-    }
-}
-
-if ($EndDate -ne $null -and $EndDate -ne "") {
-    [datetime]$temp = [DateTime]::Now
-
-    if ([datetime]::TryParse($EndDate, [ref]$temp)) {
-        $EndDate = $temp;
-    } else {
-        Write-Error "Invalid EndDate." -ErrorAction Stop
-    }
-}
-
-################################################################################
-# Parameters are OK. Display usage if that's what was asked for.
-################################################################################
-
-Write-Host 
-
-if ($Usage) {
+function Show-Usage {
     Write-Host 'Get-TeamsArtifacts'
     Write-Host '    -Usage'
     Write-Host 
@@ -173,21 +100,176 @@ if ($Usage) {
     Exit 0
 }
 
+function Get-AuthHeaders {
+    $clientId = ${Env:EXPORT_TOOL.CLIENT_ID}
+    $tenantId = ${Env:EXPORT_TOOL.TENANT_ID}
+    $clientSecret = ${Env:EXPORT_TOOL.CLIENT_SECRET}
+
+    if ($null -eq $clientId) {
+        Write-Error "EXPORT_TOOL.CLIENT_ID environment variable not set." -ErrorAction Stop
+    }
+
+    if ($null -eq $tenantId) {
+        Write-Error "EXPORT_TOOL.TENANT_ID environment variable not set" -ErrorAction Stop
+    }
+
+    if ($null -eq $clientSecret) {
+        Write-Error "EXPORT_TOOL.CLIENT_SECRET environment variable not set" -ErrorAction Stop
+    }
+
+    $body = @{
+        client_id     = $clientId
+        client_secret = $clientSecret
+        scope         = "https://graph.microsoft.com/.default"
+        grant_type    = "client_credentials"
+    }
+
+    $tokenResponse = Invoke-RestMethod -Uri "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token" -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
+    $accessToken = $tokenResponse.access_token
+    # Note that tokenResponse.expires_in and ext_expires_in is in seconds
+    
+    $localHeaders = @{
+        "Authorization" = "Bearer $accessToken"
+        "Content-Type"  = "application/json"
+    }
+
+    # TODO: Handle expirations as this is 1 hour.
+    return $localHeaders
+}
+
+function OutputArtifact {
+    param (
+        $item
+    )
+
+    Write-Host $item.Name
+
+    if ($firstObject) {
+        $global:firstObject = $false
+        $output.WriteLine()
+    } else {
+        $output.WriteLine(",")
+    }
+
+    $output.WriteLine("  {")
+    $output.WriteLine("    ""name"" : ""$($item.name)""")
+    $output.WriteLine("    ""mime-type"" : ""$($item.file.mimeType)""")
+    $output.WriteLine("    ""downloadUrl"" : ""$($item.'@microsoft.graph.downloadUrl')""")
+    $output.Write("  }")
+}
+
+function VisitFileSystemFolder {
+    param (
+        [string]$driveID,
+        [string]$driveItemID,
+        [bool]$recurse
+    )
+
+    # This is called with a folder ID, so get all the items in this folder.
+    $uri = "https://graph.microsoft.com/v1.0/drives/$($driveID)/items/$($driveItemID)/children"
+    $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
+    $items = $response.value
+
+    foreach ($item in $items) {
+        if ($item.file) {
+            # If file qualifies, output it.
+            OutputArtifact $item
+        } elseif ($item.folder.childCount -gt 0) {
+            # Visit all non-empty subfolders
+            VisitFileSystemFolder $driveID $item.Id $recurse
+        }
+    }
+}
+
+function VisitOneDrive {
+    param($Full)
+
+    $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/users" -Headers $headers -Method Get
+    $users = $response.value
+    
+    foreach ($user in $users) {
+        #Write-Host "$($user.displayName)"
+
+        $uri = "https://graph.microsoft.com/v1.0/users/$($user.id)/drive/root"
+        $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
+        $root = $response.id
+        
+        if ($Full) {
+            if ($response.folder.childCount -gt 0) {
+                VisitFileSystemFolder "NEED DRIVE ID" $root $true
+            }
+        } else {
+            # Transcript/Recordings = Recordings folder, *.mp4 (or check metadata)
+            $response = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/users/$($user.id)/drive/root:/Recordings"
+            if (response.folder.childCount -gt 0) {
+                VisitFileSystemFolder "NEED DRIVE ID" $response.id $false
+            }   
+    
+            # Notes = Meetings folder, *.loop (or check metadata)
+            $response = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me/drive/root:/Meetings"
+            if (response.folder.childCount -gt 0) {
+                VisitFileSystemFolder "NEED DRIVE ID" $response.id $false
+            }   
+    
+            # WB = Whiteboards folder, *.whiteboard (or check metadata)
+            $response = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me/drive/root:/Whiteboards"
+            if (response.folder.childCount -gt 0) {
+                VisitFileSystemFolder "NEED DRIVE ID" $response.id $false
+            }   
+        }
+    }
+}
+
+function VisitSharePoint {
+    param($Full)
+
+    # Get all the sites across all collections
+    $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/sites?search=*" -Headers $headers -Method Get
+    $sites = $response.value
+
+    foreach ($site in $sites) {
+        # Get all the drives (document libraries) in the site
+        $response = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/sites/$($site.id)/drives" -Headers $headers -Method Get
+        $drives = $response.value
+
+        if ($Full) {
+            foreach ($drive in $drives) {
+                # Get the root folder of the drive
+                $uri = "https://graph.microsoft.com/v1.0/drives/$($drive.id)/root"
+                $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method Get
+
+                if ($response.folder.childCount -gt 0) {
+                    VisitFileSystemFolder $drive.id $response.id $Full
+                }   
+            }
+        } else {
+            # TODO: Handle subset
+        }
+    }
+}
+
 ################################################################################
-# Parameters are OK. Do the actual extraction.
+# Main Program
 ################################################################################
 
-# Import required modules
-
-#Write-Host "Importing Microsoft Graph... (full graph may take ~5 minutes the first time)"
-#Import-Module Microsoft.Graph
-
-Write-Host "Importing Microsoft Graph... (may take a minute the first time)"
-Import-Module Microsoft.Graph.Files
-Import-Module Microsoft.Graph.Sites
-
-Write-Host "Done Loading."
+ValidateParameters $PSBoundParameters
 Write-Host 
 
-#ConneVisitSharePointFiles $Full
-VisitOneDriveFiles $Full
+if ($Usage) {
+    Show-Usage
+    Exit 0
+}
+
+$headers = Get-AuthHeaders
+
+$output = [System.IO.StreamWriter]::new("D:/github/experiments/PowerShellExportScript/TeamsArtifacts.json", $false)
+$output.Write("[")
+
+VisitSharePoint $true
+VisitOneDrive $true
+
+$output.WriteLine()
+$output.WriteLine("]")
+$output.Close()
+
+Write-Host

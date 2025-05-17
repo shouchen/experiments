@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "PowerShell",
+      "request": "launch",
+      "name": "Debug GetTeamsArtifacts.ps1",
+      "script": "D:/github/experiments/PowerShellExportScript/GetTeamsArtifacts.ps1",
+      "args": [
+        "-Usage"
+      ]
+    }
+  ]
+}
