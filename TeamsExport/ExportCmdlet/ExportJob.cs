@@ -1,71 +1,33 @@
-﻿using System.Reflection.PortableExecutable;
-using System.Text.Json;
-using static System.Net.Mime.MediaTypeNames;
+﻿using System.Text.Json;
 
 namespace ExportCmdlet
 {
     public class ExportJob
     {
-        public ExportJob(string? user, string? channel, CallType? callType, ArtifactType? artifactType, DateTime? startDate, DateTime? endDate)
+        public ExportJob(string? user, string? channel, CallType? callType, ArtifactType? artifactType, DateTime? startTime, DateTime? endTime)
         {
             User = user;
             Channel = channel;
             CallType = callType;
             ArtifactType = artifactType;
-            StartDate = startDate;
-            EndDate = endDate;
+            StartTime = startTime;
+            EndTime = endTime;
         }
 
-        public void Start()
+        public void Start(string clientId, string tenantId, string clientSecret)
         {
-            SetAuthHeadersAsync().GetAwaiter().GetResult();
+            var handler = new AuthenticatedHttpClientHandler(clientId, tenantId, clientSecret)
+            {
+                InnerHandler = new HttpClientHandler()
+            };
+
+            client = new HttpClient(handler);
+            client.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", "application/json");
+
             System.Console.Write("[");
             VisitSharePointAsync(true).GetAwaiter().GetResult();
             VisitOneDriveAsync(true).GetAwaiter().GetResult();
             System.Console.WriteLine("\n]\n");
-        }
-
-        private async Task SetAuthHeadersAsync()
-        {
-            var clientId = Environment.GetEnvironmentVariable("EXPORT_TOOL.CLIENT_ID");
-            var tenantId = Environment.GetEnvironmentVariable("EXPORT_TOOL.TENANT_ID");
-            var clientSecret = Environment.GetEnvironmentVariable("EXPORT_TOOL.CLIENT_SECRET");
-
-            if (string.IsNullOrEmpty(clientId))
-                throw new InvalidOperationException("EXPORT_TOOL.CLIENT_ID environment variable not set.");
-            if (string.IsNullOrEmpty(tenantId))
-                throw new InvalidOperationException("EXPORT_TOOL.TENANT_ID environment variable not set.");
-            if (string.IsNullOrEmpty(clientSecret))
-                throw new InvalidOperationException("EXPORT_TOOL.CLIENT_SECRET environment variable not set.");
-
-            var body = new Dictionary<string, string>
-            {
-                { "client_id", clientId },
-                { "client_secret", clientSecret },
-                { "scope", "https://graph.microsoft.com/.default" },
-                { "grant_type", "client_credentials" }
-            };
-
-            var request = new HttpRequestMessage(HttpMethod.Post, $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token")
-            {
-                Content = new FormUrlEncodedContent(body)
-            };
-
-            var response = await client.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var json = await response.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-            var tokenType = doc.RootElement.GetProperty("token_type").GetString();
-            var accessToken = doc.RootElement.GetProperty("access_token").GetString();
-
-            // Proactively refresh before this many seconds and/or do it when a request comes back with "invalid_token".
-            // Simplest is the latter since token like is long. If I can't get a new token, I can do exponential backoff
-            // (1s, 2s, 4s...) and then give up after some number of tries.
-            var expiresIn = doc.RootElement.GetProperty("expires_in").GetInt32();
-
-            client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", $"{tokenType} {accessToken}");
-            client.DefaultRequestHeaders.TryAddWithoutValidation("Content-Type", "application/json");
         }
 
         private void OutputArtifact(JsonElement item)
@@ -77,13 +39,11 @@ namespace ExportCmdlet
             System.Console.WriteLine($"    \"name\" : \"{item.GetProperty("name").GetString()}\"");
             System.Console.WriteLine($"    \"mime-type\" : \"{item.GetProperty("file").GetProperty("mimeType").GetString()}\"");
             System.Console.WriteLine($"    \"downloadUrl\" : \"{item.GetProperty("@microsoft.graph.downloadUrl").GetString()}\"");
+            System.Console.WriteLine($"    \"lastModifiedDateTime\" : \"{item.GetProperty("lastModifiedDateTime").GetString()}\"");
             System.Console.Write("  }");
         }
 
-        private async Task VisitFileSystemFolderAsync(
-            string driveId,
-            string driveItemId,
-            bool recurse)
+        private async Task VisitFileSystemFolderAsync(string driveId, string driveItemId, bool recurse)
         {
             var uri = $"https://graph.microsoft.com/v1.0/drives/{driveId}/items/{driveItemId}/children";
             var response = await client.GetAsync(uri);
@@ -98,6 +58,16 @@ namespace ExportCmdlet
             {
                 if (item.TryGetProperty("file", out _))
                 {
+                    item.TryGetProperty("lastModifiedDateTime", out var value);
+                    if (value.TryGetDateTime(out var lastModifiedDateTime))
+                    {
+                        if ((StartTime.HasValue && lastModifiedDateTime < StartTime) ||
+                            (EndTime.HasValue && lastModifiedDateTime > EndTime))
+                        {
+                            continue;
+                        }
+                    }
+
                     OutputArtifact(item);
                 }
                 else if (item.TryGetProperty("folder", out var folder) &&
@@ -234,8 +204,8 @@ namespace ExportCmdlet
         private string? Channel { get; }
         private CallType? CallType { get; }
         private ArtifactType? ArtifactType { get; }
-        private DateTime? StartDate { get; }
-        private DateTime? EndDate { get; }
+        private DateTime? StartTime { get; }
+        private DateTime? EndTime { get; }
 
         private bool firstObject = true;
         private HttpClient client = new HttpClient();

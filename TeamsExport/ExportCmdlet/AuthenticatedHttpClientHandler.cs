@@ -1,36 +1,93 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using System.Net;
 using System.Net.Http.Headers;
-using System.Net;
-using System.Text;
-using System.Threading.Tasks;
+using System.Text.Json;
 
-//namespace ExportCmdlet
-//{
-//    public class AuthenticatedHttpClientHandler : DelegatingHandler
-//    {
-//        private readonly ITokenService _tokenService;
+namespace ExportCmdlet
+{
+    public class AuthenticatedHttpClientHandler : DelegatingHandler
+    {
+        public AuthenticatedHttpClientHandler(string clientId, string tenantId, string clientSecret)
+        {
+            this.clientId = clientId;
+            this.tenantId = tenantId;
+            this.clientSecret = clientSecret;
+        }
 
-//        public AuthenticatedHttpClientHandler(ITokenService tokenService)
-//        {
-//            _tokenService = tokenService;
-//        }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrEmpty(accessToken))
+            {
+                GetAccessToken().GetAwaiter().GetResult();
+            }
 
-//        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-//        {
-//            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _tokenService.GetAccessToken());
+            request.Headers.Authorization = new AuthenticationHeaderValue(tokenType, accessToken);
 
-//            var response = await base.SendAsync(request, cancellationToken);
+            for (var defaultBackoffSeconds = 1; defaultBackoffSeconds <= 4; defaultBackoffSeconds *= 2)
+            {
+                var response = await base.SendAsync(request, cancellationToken);
 
-//            if (response.StatusCode == HttpStatusCode.Unauthorized)
-//            {
-//                _tokenService.RefreshToken();
-//                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _tokenService.GetAccessToken());
-//                response = await base.SendAsync(request, cancellationToken);
-//            }
+                switch(response.StatusCode)
+                {
+                    case HttpStatusCode.Unauthorized:
+                        GetAccessToken().GetAwaiter().GetResult();
+                        request.Headers.Authorization = new AuthenticationHeaderValue(tokenType, accessToken);
+                        break;
 
-//            return response;
-//        }
-//    }
-//}
+                    case HttpStatusCode.TooManyRequests:
+                        var delaySeconds = defaultBackoffSeconds;
+
+                        if (response.Headers.TryGetValues("Retry-After", out var values))
+                        {
+                            var retryAfterValue = values.FirstOrDefault();
+
+                            if (int.TryParse(retryAfterValue, out var seconds))
+                            {
+                                delaySeconds = seconds;
+                            }
+                            else if (DateTimeOffset.TryParse(retryAfterValue, out var retryDate))
+                            {
+                                delaySeconds = (int)(retryDate - DateTimeOffset.UtcNow).TotalSeconds;
+                            }
+                        }
+
+                        if (delaySeconds > 0)
+                            await Task.Delay(TimeSpan.FromSeconds(delaySeconds), cancellationToken);
+                        break;
+
+                    default:
+                        return response;
+                }
+            }
+
+            throw new HttpRequestException("All retry attempts for the HTTP request have been exhausted (Unauthorized or TooManyRequests).");
+        }
+
+        private async Task GetAccessToken()
+        {
+            var body = new Dictionary<string, string>
+               {
+                   { "client_id", clientId },
+                   { "client_secret", clientSecret },
+                   { "scope", "https://graph.microsoft.com/.default" },
+                   { "grant_type", "client_credentials" }
+               };
+
+            var request = new HttpRequestMessage(HttpMethod.Post, $"https://login.microsoftonline.com/{tenantId}/oauth2/v2.0/token")
+            {
+                Content = new FormUrlEncodedContent(body)
+            };
+
+            var client = new HttpClient();
+            var response = await client.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            tokenType = doc.RootElement.GetProperty("token_type").GetString() ?? string.Empty;
+            accessToken = doc.RootElement.GetProperty("access_token").GetString() ?? string.Empty;
+        }
+
+        private readonly string clientId, tenantId, clientSecret;
+        private string tokenType = string.Empty, accessToken = string.Empty;
+    }
+}
